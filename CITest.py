@@ -14,6 +14,9 @@ class worm:
 
 # ----------------------------------------------
 
+# Get file location/name
+file = input("File Location: ")
+
 # Load CSV as dataframe
 
 df = pd.read_csv('KN_Example_STAM_01.29.2025.csv') # Change string to csv file location
