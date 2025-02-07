@@ -16,6 +16,8 @@ If there is a problem with pandas you may need to downgrade your numpy with the 
 
 The error is occuring due to incompatable versions of numpy and pandas
 
+There are two different python files, CITest.py is for analyzing a single file that may be causing errors, CITest_Folders.py is for analyzing complete folders
+
 ## File formatting:
 Make sure you are using CSV files and not Excel files
 
@@ -44,6 +46,12 @@ If that still doesn't fix it, try flipping the direction of the slashes in the f
 I honestly don't know why this fixes it, but sometimes it does
 
 If that still doesn't resolve the issue, write a comment
+
+Once the code starts running, it will create the plotted image.
+
+YOU MUST CLOSE THE IMAGE BEFORE DOING ANYTHING ELSE
+
+Once the image is closed, you will be prompted as designate whether the image worked or didn't for quality control
 
 ## Debugging:
 I tried to give the necessary comments to understand the code and what the different bits do
