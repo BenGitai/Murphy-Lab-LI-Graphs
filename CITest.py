@@ -2,6 +2,8 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import numpy as np
+import os
 
 # -----------------------------------------------
 
@@ -14,166 +16,135 @@ class worm:
 
 # ----------------------------------------------
 
-# Get file location/name
-file = input("File Location: ")
+# Get the single file path from user
+file = input("Enter the path of the CSV file: ")
 
-# Load CSV as dataframe
+# Check if file exists
+if not os.path.isfile(file):
+    print("Error: File not found!")
+    exit()
 
-df = pd.read_csv('KN_Example_STAM_01.29.2025.csv') # Change string to csv file location
+print(f"\nProcessing file: {file}")
 
-# path needed if the file has a different local path
+try:
+    # Load CSV as dataframe
+    df = pd.read_csv(file)
+    df = df.dropna(how='all')
 
-df = df.dropna(how='all')
+    # ---------------------------------------------
 
-# ---------------------------------------------
+    # Convert dataframe into list of worm objects
+    worms = []
+    for index, row in df.iterrows():
+        if row["Strain"] != "Strain":  # Avoid header issues
+            strain = row["Strain"]
+            time = row["Time"]
 
-# Covert dataframe into list of worm objects
+            # Convert specific time values
+            if time == "30":
+                time = "0.5"
+            elif time == "60":
+                time = "1"
 
-worms = []
+            # Handle missing columns
+            eth = float(row["Eth"]) if "Eth" in df.columns else 0
+            but = float(row["But"]) if "But" in df.columns else 0
+            ori = float(row["Ori"]) if "Ori" in df.columns else 0
+            tot = float(row["Tot"]) if "Tot" in df.columns else 1  # Avoid division by zero
 
-for index, row in df.iterrows():
-    if (row["Strain"] != "Strain"):
-        strain = row["Strain"]
-        time = row["Time"]
-        rep = row["Replicate"]
-        size = row["Est. Worm Size"]
-        eth = int(row["Eth"])
-        but = int(row["But"])
-        ori = int(row["Ori"])
-        tot = int(row["Tot"])
+            # Calculate CI value
+            if tot - ori != 0:
+                cI = (but - eth) / (tot - ori)
+            else:
+                cI = 0  # Default CI value if invalid
+                print("CI Error")
 
-        # Calculate CI value (cI used as CI is constant index)
-        cI = (but - eth) / (tot - ori)
+            # New worm created and added to list
+            worms.append(worm(strain, time, cI))
 
-        # New worm created and added to list
-        newWorm = worm(strain, time, cI)
+    # ----------------------------------------------
 
-        worms.append(newWorm)
+    # Compute means and standard error for CI values
+    dfWorms = pd.DataFrame([vars(w) for w in worms])
 
-# ----------------------------------------------
+    dfWorms_summary = dfWorms.groupby(["strain", "time"]).agg(
+        mean_cI=("cI", "mean"),
+        se_cI=("cI", lambda x: np.std(x) / np.sqrt(len(x)))  # Standard error calculation
+    ).reset_index()
 
-# Average worms of same strain and time step
+    # ----------------------------------------------
 
-oldStrain = worms[0].strain
-oldTime = worms[0].time
-totCI = 0
-strainCount = 1
+    # Create LI DataFrame
+    strains = dfWorms[dfWorms["time"] == "N"]["strain"].tolist()
+    strainsN = dfWorms[dfWorms["time"] == "N"]["cI"].tolist()
+    ci_n_dict = dict(zip(strains, strainsN))
 
-# Create list of new worms
-avgWorms = []
+    df_li = dfWorms.copy()
+    df_li["LI"] = df_li["cI"] - df_li["strain"].map(ci_n_dict)
+    df_li = df_li.drop(columns=["cI"])
+    df_li = df_li[df_li["time"] != "N"]
 
-for Worm in worms:
-    if (oldStrain == Worm.strain) and (oldTime == Worm.time):
-        totCI += Worm.cI
-        strainCount += 1
-    else:
-        #print(Worm.strain)
-        
-        avgCI = totCI / strainCount
-        newWorm = worm(oldStrain, oldTime, avgCI)
-        #print(newWorm.strain)
-        avgWorms.append(newWorm)
-        totCI = 0
-        strainCount = 1
+    # Compute means and standard error for LI values
+    df_li_summary = df_li.groupby(["strain", "time"]).agg(
+        mean_LI=("LI", "mean"),
+        se_LI=("LI", lambda x: np.std(x) / np.sqrt(len(x)))  # Standard error calculation
+    ).reset_index()
 
-        oldStrain = Worm.strain
-        oldTime = Worm.time
+    # --------------------------------------------
 
-# --------------------------------------------------
+    # Reorganize DataFrames
+    strain_counts = dfWorms["strain"].value_counts()
+    sorted_strains = strain_counts.index.tolist()
 
-# Convert list of average worms into a cleaned dataframe
+    def sort_by_time(df):
+        df["time"] = pd.Categorical(df["time"], categories=sorted(df["time"].unique(), key=lambda x: (x != "N", float(x) if x != "N" else -1)), ordered=True)
+        return df.sort_values(["strain", "time"])
 
-import pandas as pd
+    dfWorms_summary["strain"] = pd.Categorical(dfWorms_summary["strain"], categories=sorted_strains, ordered=True)
+    dfWorms_sorted = sort_by_time(dfWorms_summary)
 
-dfWorms = pd.DataFrame([vars(avgWorm) for avgWorm in avgWorms])
+    df_li_summary["strain"] = pd.Categorical(df_li_summary["strain"], categories=sorted_strains, ordered=True)
+    df_li_sorted = sort_by_time(df_li_summary)
 
-# --------------------------------------------------
+    # --------------------------------------------
 
-# Create a new dataframe based on the newly cleaned 
-# dataframe for the LI values instead of the CI values
+    # Set Seaborn style
+    sns.set_style("whitegrid")
 
-strains = []
-strainsN = []
-for index, row in dfWorms[dfWorms["time"] == "N"].iterrows():
-    strain = row["strain"]
-    ci_n = row["cI"]
-    #print(strain, ci_n)
-    strains.append(strain)
-    strainsN.append(ci_n)
+    # Create subplots (1 row, 2 columns)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))  
 
-ci_n_dict = dict(zip(strains, strainsN))
+    ### --- First Plot: CI Values with Error Bars --- ###
+    for strain, group in dfWorms_sorted.groupby("strain", observed=False):
+        axes[0].errorbar(group["time"], group["mean_cI"], yerr=group["se_cI"], marker="o", linestyle="-", label=strain, capsize=5)
 
-# Make a copy of the DataFrame
-df_li = dfWorms.copy()
+    axes[0].set_xlabel("Time")
+    axes[0].set_ylabel("CI Value")
+    axes[0].set_title("CI Value Over Time by Strain")
+    axes[0].legend(title="Strain")
 
-# Subtract the respective CI_N value from each row's CI value
-df_li["LI"] = df_li["cI"] - df_li["strain"].map(ci_n_dict)
+    ### --- Second Plot: LI Values with Error Bars --- ###
+    for strain, group in df_li_sorted.groupby("strain", observed=False):
+        axes[1].errorbar(group["time"], group["mean_LI"], yerr=group["se_LI"], marker="o", linestyle="-", label=strain, capsize=5)
 
-# Remove the CI column
-df_li = df_li.drop(columns=["cI"])
+    axes[1].set_xlabel("Time")
+    axes[1].set_ylabel("LI Value")
+    axes[1].set_title("LI Value Over Time by Strain")
+    axes[1].legend(title="Strain")
 
-# Remove rows where time is "N"
-df_li = df_li[df_li["time"] != "N"]
+    plt.tight_layout()
 
-# ------------------------------------------------
+    save_path = file.replace(".csv", ".png")
 
-# Reorginize the dataframes to prevent errors when graphing due to missing data
+        # Ensure the directory exists
+        #os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
-# Count occurrences of each strain and sort by frequency (highest first)
-strain_counts = dfWorms["strain"].value_counts()
-sorted_strains = strain_counts.index.tolist()  # List of strains in descending order of frequency
+        # Save the plot
+    plt.savefig(save_path)
+    # Show the plots
+    plt.show()
 
-# Function to sort by time while keeping "N" first
-def sort_by_time(df):
-    df["time"] = pd.Categorical(df["time"], categories=sorted(df["time"].unique(), key=lambda x: (x != "N", float(x) if x != "N" else -1)), ordered=True)
-    return df.sort_values(["strain", "time"])
+    # --------------------------------------------
 
-# Apply strain order to dfWorms
-dfWorms_sorted = dfWorms.copy()
-dfWorms_sorted["strain"] = pd.Categorical(dfWorms_sorted["strain"], categories=sorted_strains, ordered=True)
-dfWorms_sorted = sort_by_time(dfWorms_sorted)
-
-# Apply strain order to df_li
-df_li_sorted = df_li.copy()
-df_li_sorted["strain"] = pd.Categorical(df_li_sorted["strain"], categories=sorted_strains, ordered=True)
-df_li_sorted = sort_by_time(df_li_sorted)
-
-# Display the reorganized DataFrames
-print(dfWorms_sorted)
-print(df_li_sorted)
-
-# ------------------------------------------------
-
-# Plot and display the 2 new dataframes
-
-# Set Seaborn style
-sns.set_style("whitegrid")
-
-# Create subplots (1 row, 2 columns)
-fig, axes = plt.subplots(1, 2, figsize=(14, 6))  # 14 inches wide, 6 inches high
-
-### --- First Plot: CI Values --- ###
-for strain, group in dfWorms.groupby("strain"):
-    axes[0].plot(group["time"], group["cI"], marker="o", linestyle="-", label=strain)
-
-# Labels and title for CI plot
-axes[0].set_xlabel("Time")
-axes[0].set_ylabel("CI Value")
-axes[0].set_title("CI Value Over Time by Strain")
-axes[0].legend(title="Strain")
-
-### --- Second Plot: LI Values --- ###
-for strain, group in df_li.groupby("strain"):
-    axes[1].plot(group["time"], group["LI"], marker="o", linestyle="-", label=strain)
-
-# Labels and title for LI plot
-axes[1].set_xlabel("Time")
-axes[1].set_ylabel("LI Value")
-axes[1].set_title("LI Value Over Time by Strain")
-axes[1].legend(title="Strain")
-
-# Adjust layout to prevent overlap
-plt.tight_layout()
-
-# Show the plots
-plt.show()
+except Exception as e:
+    print(f"Error processing {file}: {e}")
